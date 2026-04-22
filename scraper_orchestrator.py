@@ -29,6 +29,7 @@ class ScraperOrchestrator:
         self.scraper = ProductScraper(self.shopify)
         self._products: List[Dict[str, Any]] = []
         self._failed: List[str] = []
+        self._existing_products: Dict[str, Dict] = {}
 
     def test_connections(self) -> bool:
         log_step("SETUP", "Testing connections...")
@@ -101,7 +102,11 @@ class ScraperOrchestrator:
         return products
 
     def _run_embedding_phase(self, products: List[Dict[str, Any]]):
-        log_step("PHASE-2", "Generating embeddings...")
+        log_step("PHASE-2", "Generating embeddings (smart - skip unchanged)...")
+
+        if not self._existing_products:
+            all_existing = self.supabase.get_all_products_for_source()
+            self._existing_products = {p.get("id"): p for p in all_existing}
 
         try:
             model = get_embedding_model()
@@ -111,52 +116,64 @@ class ScraperOrchestrator:
             return
 
         for i, product in enumerate(products, 1):
-            try:
-                image_url = product.get("image_url")
-                info_text = product.get("title", "") + " " + product.get("description", "") + " " + product.get("category", "")
+            product_id = product.get("id")
+            existing = self._existing_products.get(product_id)
 
-                embeddings = encode_product(image_url, info_text)
-                product["image_embedding"] = embeddings.get("image_embedding")
-                product["info_embedding"] = embeddings.get("info_embedding")
+            should_embed = True
+            if existing:
+                old_image = existing.get("image_url", "")
+                new_image = product.get("image_url", "")
+                if old_image == new_image:
+                    product["image_embedding"] = existing.get("image_embedding")
+                    product["info_embedding"] = existing.get("info_embedding")
+                    should_embed = False
 
-                if i % 5 == 0:
-                    logger.info(f"Embedding progress: {i}/{len(products)}")
+            if should_embed:
+                try:
+                    image_url = product.get("image_url")
+                    info_text = product.get("title", "") + " " + product.get("description", "") + " " + product.get("category", "")
 
-            except Exception as e:
-                log_error(product.get("product_url", "unknown"), e)
-                continue
+                    embeddings = encode_product(image_url, info_text)
+                    product["image_embedding"] = embeddings.get("image_embedding")
+                    product["info_embedding"] = embeddings.get("info_embedding")
+
+                    if i % 5 == 0:
+                        logger.info(f"Embedding progress: {i}/{len(products)}")
+
+                except Exception as e:
+                    log_error(product.get("product_url", "unknown"), e)
+                    continue
 
         state.embeddings_count += len(products)
         state.save()
         logger.success(f"Generated embeddings for {len(products)} products")
 
     def _run_db_phase(self, products: List[Dict[str, Any]]) -> Tuple[int, int]:
-        log_step("PHASE-3", "Importing to Supabase...")
+        log_step("PHASE-3", "Importing to Supabase (smart batch)...")
 
-        existing_urls = set(self.supabase.get_existing_products())
-        to_insert = []
-        skipped = 0
+        self._existing_products = {}
+        all_existing = self.supabase.get_all_products_for_source()
+        for p in all_existing:
+            self._existing_products[p.get("id")] = p
 
-        for product in products:
-            url = product.get("product_url")
-            if url in existing_urls:
-                result = self.supabase._update_product(product)
-                if not result:
-                    to_insert.append(product)
-                else:
-                    skipped += 1
-            else:
-                to_insert.append(product)
+        current_ids = {p.get("id") for p in products}
 
-        if to_insert:
-            batch_result = self.supabase.upsert_products_batch(to_insert)
-            inserted = batch_result.get("success", 0)
-            failed = batch_result.get("failed", 0)
-        else:
-            inserted, failed = 0, 0
+        result = self.supabase.process_products_batch(products, self._existing_products)
 
-        logger.success(f"DB import: {inserted} inserted, {skipped} skipped, {failed} failed")
-        return inserted, skipped
+        self.supabase.update_last_seen_count(list(current_ids))
+
+        stale_deleted = self.supabase.delete_stale_products(current_ids, self.supabase.source)
+
+        state.last_db_import_time = datetime.now().isoformat()
+        state.save()
+
+        inserted = result.get("new", 0)
+        updated = result.get("updated", 0)
+        unchanged = result.get("unchanged", 0)
+        failed = result.get("failed", 0)
+
+        logger.success(f"DB import: {inserted} new, {updated} updated, {unchanged} unchanged, {failed} failed, {stale_deleted} stale deleted")
+        return inserted + updated, unchanged
 
     def scrape_product_urls(self) -> List[str]:
         handles = self.scraper.get_all_handles()
