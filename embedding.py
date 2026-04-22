@@ -54,22 +54,34 @@ class SigLIPEmbeddingModel:
 
         logger.info(f"Loading SigLIP model: {self.model_name} on {self.device}")
 
+        import sentencepiece
         from transformers import AutoProcessor, AutoModel
 
-        if self.device == "cuda":
-            self._model = AutoModel.from_pretrained(
-                self.model_name,
-                device_map="auto",
-                torch_dtype=torch.float32,
-            )
-        else:
-            self._model = AutoModel.from_pretrained(
-                self.model_name,
-            ).to(self.device)
+        try:
+            self._processor = AutoProcessor.from_pretrained(self.model_name)
+        except Exception as e:
+            logger.warning(f"Processor load failed, retrying: {e}")
+            self._processor = None
+            self._model = None
+            raise
 
-        self._processor = AutoProcessor.from_pretrained(self.model_name)
+        try:
+            if self.device == "cuda":
+                self._model = AutoModel.from_pretrained(
+                    self.model_name,
+                    device_map="auto",
+                    torch_dtype=torch.float32,
+                )
+            else:
+                self._model = AutoModel.from_pretrained(
+                    self.model_name,
+                ).to(self.device)
+        except Exception as e:
+            logger.warning(f"Model load failed, retrying: {e}")
+            self._model = None
+            raise
+
         self._model.eval()
-
         logger.success(f"SigLIP model loaded successfully")
 
     def get_image_embeddings(self, images: List[Image.Image]) -> List[List[float]]:
