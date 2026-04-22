@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+.env
+logs/
+*.log
+.scraper_state.json
+failed_products.json
+*.json
+.DS_Store
+node_modules/

@@ -1,0 +1,109 @@
+name: Scrape Milkbar Products
+
+on:
+  schedule:
+    - cron: "0 0 * * 5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Scrape mode"
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - full
+          - scrape
+          - db
+          - resume
+      handle:
+        description: "Product handle (for single mode)"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scrape:
+    name: Scrape and import products
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env file
+        shell: bash
+        run: |
+          cat > .env << 'ENVEOF'
+          shopify_store_domain=${{ secrets.SHOPIFY_STORE_DOMAIN }}
+          shopify_storefront_token=${{ secrets.SHOPIFY_STOREFRONT_TOKEN }}
+          shopify_api_version=2025-07
+          supabase_url=${{ secrets.SUPABASE_URL }}
+          supabase_anon_key=${{ secrets.SUPABASE_ANON_KEY }}
+          shopify_product_fetch_limit=50
+          shopify_max_pages=100
+          scrape_batch_size=10
+          embedding_model=google/siglip-base-patch16-384
+          embedding_dimension=768
+          embeddings_per_product=1
+          embedding_batch_size=4
+          user_agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
+          request_timeout=30
+          max_retries=3
+          retry_delay=5
+          log_level=INFO
+          ENVEOF
+
+      - name: Run Milkbar scraper
+        id: run_scraper
+        run: |
+          if [ "${{ github.event.inputs.mode }}" == "single" ] && [ -n "${{ github.event.inputs.handle }}" ]; then
+            echo "Running single product scrape: ${{ github.event.inputs.handle }}"
+            python run.py --mode single --handle "${{ github.event.inputs.handle }}"
+          else
+            echo "Running mode: ${{ github.event.inputs.mode || 'full' }}"
+            python run.py --mode ${{ github.event.inputs.mode || 'full' }}
+          fi
+        continue-on-error: false
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-logs-failure
+          path: logs/
+          retention-days: 7
+
+      - name: Upload state on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-state-failure
+          path: |
+            .scraper_state.json
+            failed_products.json
+          retention-days: 7
+
+      - name: Report completion
+        if: success()
+        run: |
+          echo "Scraper completed successfully"
+          echo "Check Supabase dashboard for imported products"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
