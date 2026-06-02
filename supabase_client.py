@@ -85,6 +85,7 @@ class SupabaseClient:
             ("size", str),
             ("image_url", str),
             ("additional_images", str),
+            ("product_url", str),
         ]
 
         for field, field_type in fields_to_check:

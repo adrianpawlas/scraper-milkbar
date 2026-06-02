@@ -161,7 +161,7 @@ class ProductScraper:
         info_text = " ".join(p for p in info_text_parts if p)
         info_text = truncate_text(info_text, 2000)
 
-        product_url = f"https://milkbarmelbourne.com/store-flat/{handle}"
+        product_url = f"https://milkbarmelbourne.com/products/{handle}"
         image_url = featured_image.get("url", "") if featured_image else ""
         additional_images = format_additional_images(images[1:]) if len(images) > 1 else ""
 
@@ -181,7 +181,7 @@ class ProductScraper:
             "size": sizes,
             "second_hand": False,
             "image_embedding": None,
-            "country": "AU",
+            "country": None,
             "compressed_image_url": None,
             "tags": tags,
             "title_tsv": None,

@@ -72,7 +72,7 @@ class ScraperConfig:
     max_retries: int = int(os.getenv("max_retries", "3"))
     retry_delay: int = int(os.getenv("retry_delay", "5"))
     store_url: str = "https://milkbarmelbourne.com"
-    store_flat_url: str = "https://milkbarmelbourne.com/store-flat"
+    store_flat_url: str = "https://milkbarmelbourne.com/products"
 
 
 @dataclass

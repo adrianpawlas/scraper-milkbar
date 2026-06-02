@@ -83,7 +83,7 @@ class ScraperOrchestrator:
         existing = self.supabase.get_existing_products()
         all_handles = self.scraper.get_all_handles()
         new_handles = [h for h in all_handles
-                   if f"https://milkbarmelbourne.com/store-flat/{h}" not in existing]
+                   if f"https://milkbarmelbourne.com/products/{h}" not in existing]
 
         logger.info(f"Found {len(new_handles)} new products")
         products = []
@@ -177,7 +177,7 @@ class ScraperOrchestrator:
 
     def scrape_product_urls(self) -> List[str]:
         handles = self.scraper.get_all_handles()
-        urls = [f"https://milkbarmelbourne.com/store-flat/{h}" for h in handles]
+        urls = [f"https://milkbarmelbourne.com/products/{h}" for h in handles]
         return urls
 
     def scrape_single_product(self, handle: str) -> Optional[Dict[str, Any]]:
